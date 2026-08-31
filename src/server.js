@@ -1,5 +1,6 @@
 const express = require("express");
 const folderRoutes = require("./routes/folder");
+const fileRoutes = require("./routes/file");
 const cors = require("cors");
 require("dotenv").config();
 
@@ -21,6 +22,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/folders", folderRoutes);
+app.use("/api/files", fileRoutes);
 
 
 // Basic health check
