@@ -32,14 +32,13 @@ router.post(
         try {
             const { folder_id = null } = req.body;
 
-            // Check if file exists
             if (!req.file) {
                 return res.status(400).json({
                     message: "File is required"
                 });
             }
 
-            // If folder_id is provided, verify ownership
+            // Verify folder ownership if folder_id is provided
             if (folder_id) {
                 const { data: folder, error: folderError } =
                     await supabase
@@ -59,35 +58,26 @@ router.post(
 
             // Create unique storage path
             const fileName = `${Date.now()}-${req.file.originalname}`;
-
-            const storageKey =
-                `${req.user.id}/${fileName}`;
+            const storageKey = `${req.user.id}/${fileName}`;
 
             // Upload file to Supabase Storage
             const { error: uploadError } =
                 await supabase.storage
                     .from("files")
-                    .upload(
-                        storageKey,
-                        req.file.buffer,
-                        {
-                            contentType: req.file.mimetype,
-                            upsert: false
-                        }
-                    );
+                    .upload(storageKey, req.file.buffer, {
+                        contentType: req.file.mimetype,
+                        upsert: false
+                    });
 
             if (uploadError) {
-                console.error(
-                    "Storage upload error:",
-                    uploadError
-                );
+                console.error("Storage upload error:", uploadError);
 
                 return res.status(400).json({
                     message: uploadError.message
                 });
             }
 
-            // Save file metadata in database
+            // Save file metadata
             const { data: fileData, error: dbError } =
                 await supabase
                     .from("files")
@@ -104,12 +94,9 @@ router.post(
                     .select()
                     .single();
 
-            // Remove storage file if database insert fails
+            // Remove uploaded file if database save fails
             if (dbError) {
-                console.error(
-                    "Database error:",
-                    dbError
-                );
+                console.error("Database error:", dbError);
 
                 await supabase.storage
                     .from("files")
@@ -126,10 +113,7 @@ router.post(
             });
 
         } catch (error) {
-            console.error(
-                "File upload error:",
-                error
-            );
+            console.error("File upload error:", error);
 
             res.status(500).json({
                 message: "Failed to upload file"
@@ -160,11 +144,6 @@ router.get(
                     });
 
             if (error) {
-                console.error(
-                    "Get root files error:",
-                    error
-                );
-
                 return res.status(400).json({
                     message: error.message
                 });
@@ -176,10 +155,7 @@ router.get(
             });
 
         } catch (error) {
-            console.error(
-                "Get root files error:",
-                error
-            );
+            console.error("Get root files error:", error);
 
             res.status(500).json({
                 message: "Failed to fetch root files"
@@ -200,7 +176,7 @@ router.get(
         try {
             const { folderId } = req.params;
 
-            // Verify folder belongs to logged-in user
+            // Verify folder ownership
             const { data: folder, error: folderError } =
                 await supabase
                     .from("folders")
@@ -216,7 +192,6 @@ router.get(
                 });
             }
 
-            // Get files inside folder
             const { data, error } =
                 await supabase
                     .from("files")
@@ -229,11 +204,6 @@ router.get(
                     });
 
             if (error) {
-                console.error(
-                    "Get folder files error:",
-                    error
-                );
-
                 return res.status(400).json({
                     message: error.message
                 });
@@ -245,13 +215,143 @@ router.get(
             });
 
         } catch (error) {
-            console.error(
-                "Get folder files error:",
-                error
-            );
+            console.error("Get folder files error:", error);
 
             res.status(500).json({
                 message: "Failed to fetch folder files"
+            });
+        }
+    }
+);
+
+
+/* =========================
+   DOWNLOAD FILE
+========================= */
+
+router.get(
+    "/:fileId/download",
+    authMiddleware,
+    async (req, res) => {
+        try {
+            const { fileId } = req.params;
+
+            // Find file and verify ownership
+            const { data: file, error } =
+                await supabase
+                    .from("files")
+                    .select("*")
+                    .eq("id", fileId)
+                    .eq("owner_id", req.user.id)
+                    .eq("is_deleted", false)
+                    .single();
+
+            if (error || !file) {
+                return res.status(404).json({
+                    message: "File not found"
+                });
+            }
+
+            // Download from Supabase Storage
+            const { data: fileData, error: downloadError } =
+                await supabase.storage
+                    .from("files")
+                    .download(file.storage_key);
+
+            if (downloadError) {
+                console.error("Download error:", downloadError);
+
+                return res.status(400).json({
+                    message: downloadError.message
+                });
+            }
+
+            // Force browser/download client to download
+            res.setHeader(
+                "Content-Disposition",
+                `attachment; filename="${file.name}"`
+            );
+
+            res.setHeader(
+                "Content-Type",
+                file.mime_type || "application/octet-stream"
+            );
+
+            const buffer = Buffer.from(
+                await fileData.arrayBuffer()
+            );
+
+            res.send(buffer);
+
+        } catch (error) {
+            console.error("File download error:", error);
+
+            res.status(500).json({
+                message: "Failed to download file"
+            });
+        }
+    }
+);
+
+
+/* =========================
+   PREVIEW FILE
+========================= */
+
+router.get(
+    "/:fileId/preview",
+    authMiddleware,
+    async (req, res) => {
+        try {
+            const { fileId } = req.params;
+
+            // Find file and verify ownership
+            const { data: file, error } =
+                await supabase
+                    .from("files")
+                    .select("*")
+                    .eq("id", fileId)
+                    .eq("owner_id", req.user.id)
+                    .eq("is_deleted", false)
+                    .single();
+
+            if (error || !file) {
+                return res.status(404).json({
+                    message: "File not found"
+                });
+            }
+
+            // Create temporary signed URL for preview
+            const { data, error: signedUrlError } =
+                await supabase.storage
+                    .from("files")
+                    .createSignedUrl(
+                        file.storage_key,
+                        60 * 10 // 10 minutes
+                    );
+
+            if (signedUrlError) {
+                console.error(
+                    "Preview URL error:",
+                    signedUrlError
+                );
+
+                return res.status(400).json({
+                    message: signedUrlError.message
+                });
+            }
+
+            res.status(200).json({
+                message: "Preview URL generated successfully",
+                preview_url: data.signedUrl,
+                expires_in: "10 minutes"
+            });
+
+        } catch (error) {
+            console.error("File preview error:", error);
+
+            res.status(500).json({
+                message: "Failed to generate preview URL"
             });
         }
     }
@@ -300,10 +400,7 @@ router.patch(
             });
 
         } catch (error) {
-            console.error(
-                "Rename file error:",
-                error
-            );
+            console.error("Rename file error:", error);
 
             res.status(500).json({
                 message: "Failed to rename file"
@@ -347,10 +444,7 @@ router.delete(
             });
 
         } catch (error) {
-            console.error(
-                "Delete file error:",
-                error
-            );
+            console.error("Delete file error:", error);
 
             res.status(500).json({
                 message: "Failed to delete file"
