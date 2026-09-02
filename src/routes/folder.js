@@ -1,5 +1,7 @@
 const express = require("express");
+
 const supabase = require("../supabase");
+
 const authMiddleware = require("../middleware/authMiddleware");
 
 const router = express.Router();
@@ -11,25 +13,28 @@ const router = express.Router();
 // ========================================
 
 router.post("/", authMiddleware, async (req, res) => {
+
     try {
+
         const { name, parent_id = null } = req.body;
 
-        // Validate folder name
         if (!name || !name.trim()) {
             return res.status(400).json({
                 message: "Folder name is required"
             });
         }
 
-        // If parent folder is provided, verify it belongs to the user
+        // Verify parent folder
         if (parent_id) {
-            const { data: parentFolder, error: parentError } = await supabase
-                .from("folders")
-                .select("id")
-                .eq("id", parent_id)
-                .eq("owner_id", req.user.id)
-                .eq("is_deleted", false)
-                .single();
+
+            const { data: parentFolder, error: parentError } =
+                await supabase
+                    .from("folders")
+                    .select("id")
+                    .eq("id", parent_id)
+                    .eq("owner_id", req.user.id)
+                    .eq("is_deleted", false)
+                    .single();
 
             if (parentError || !parentFolder) {
                 return res.status(404).json({
@@ -38,7 +43,6 @@ router.post("/", authMiddleware, async (req, res) => {
             }
         }
 
-        // Create folder
         const { data, error } = await supabase
             .from("folders")
             .insert([
@@ -65,10 +69,55 @@ router.post("/", authMiddleware, async (req, res) => {
         });
 
     } catch (error) {
+
         console.error("Create folder error:", error);
 
         return res.status(500).json({
             message: "Failed to create folder"
+        });
+    }
+});
+
+
+// ========================================
+// GET DELETED FOLDERS / TRASH
+// GET /api/folders/trash
+// Must come before /:folderId
+// ========================================
+
+router.get("/trash", authMiddleware, async (req, res) => {
+
+    try {
+
+        const { data, error } = await supabase
+            .from("folders")
+            .select("*")
+            .eq("owner_id", req.user.id)
+            .eq("is_deleted", true)
+            .order("updated_at", {
+                ascending: false
+            });
+
+        if (error) {
+
+            console.error("Get folder trash error:", error);
+
+            return res.status(400).json({
+                message: error.message
+            });
+        }
+
+        return res.status(200).json({
+            message: "Deleted folders fetched successfully",
+            folders: data
+        });
+
+    } catch (error) {
+
+        console.error("Get folder trash error:", error);
+
+        return res.status(500).json({
+            message: "Failed to fetch deleted folders"
         });
     }
 });
@@ -80,16 +129,21 @@ router.post("/", authMiddleware, async (req, res) => {
 // ========================================
 
 router.get("/", authMiddleware, async (req, res) => {
+
     try {
+
         const { data, error } = await supabase
             .from("folders")
             .select("*")
             .eq("owner_id", req.user.id)
             .is("parent_id", null)
             .eq("is_deleted", false)
-            .order("created_at", { ascending: false });
+            .order("created_at", {
+                ascending: false
+            });
 
         if (error) {
+
             console.error("Get folders error:", error);
 
             return res.status(400).json({
@@ -103,6 +157,7 @@ router.get("/", authMiddleware, async (req, res) => {
         });
 
     } catch (error) {
+
         console.error("Get folders error:", error);
 
         return res.status(500).json({
@@ -113,38 +168,46 @@ router.get("/", authMiddleware, async (req, res) => {
 
 
 // ========================================
-// GET SINGLE FOLDER
-// GET /api/folders/:folderId
+// RESTORE FOLDER
+// PATCH /api/folders/:folderId/restore
 // ========================================
 
-router.get("/:folderId", authMiddleware, async (req, res) => {
+router.patch("/:folderId/restore", authMiddleware, async (req, res) => {
+
     try {
+
         const { folderId } = req.params;
 
         const { data, error } = await supabase
             .from("folders")
-            .select("*")
+            .update({
+                is_deleted: false,
+                updated_at: new Date().toISOString()
+            })
             .eq("id", folderId)
             .eq("owner_id", req.user.id)
-            .eq("is_deleted", false)
+            .eq("is_deleted", true)
+            .select()
             .single();
 
         if (error || !data) {
+
             return res.status(404).json({
-                message: "Folder not found"
+                message: "Deleted folder not found"
             });
         }
 
         return res.status(200).json({
-            message: "Folder fetched successfully",
+            message: "Folder restored successfully",
             folder: data
         });
 
     } catch (error) {
-        console.error("Get folder error:", error);
+
+        console.error("Restore folder error:", error);
 
         return res.status(500).json({
-            message: "Failed to fetch folder"
+            message: "Failed to restore folder"
         });
     }
 });
@@ -156,19 +219,22 @@ router.get("/:folderId", authMiddleware, async (req, res) => {
 // ========================================
 
 router.get("/:folderId/children", authMiddleware, async (req, res) => {
+
     try {
+
         const { folderId } = req.params;
 
-        // Verify parent folder belongs to user
-        const { data: parentFolder, error: parentError } = await supabase
-            .from("folders")
-            .select("id")
-            .eq("id", folderId)
-            .eq("owner_id", req.user.id)
-            .eq("is_deleted", false)
-            .single();
+        const { data: parentFolder, error: parentError } =
+            await supabase
+                .from("folders")
+                .select("id")
+                .eq("id", folderId)
+                .eq("owner_id", req.user.id)
+                .eq("is_deleted", false)
+                .single();
 
         if (parentError || !parentFolder) {
+
             return res.status(404).json({
                 message: "Folder not found"
             });
@@ -180,9 +246,12 @@ router.get("/:folderId/children", authMiddleware, async (req, res) => {
             .eq("parent_id", folderId)
             .eq("owner_id", req.user.id)
             .eq("is_deleted", false)
-            .order("created_at", { ascending: false });
+            .order("created_at", {
+                ascending: false
+            });
 
         if (error) {
+
             console.error("Get child folders error:", error);
 
             return res.status(400).json({
@@ -196,10 +265,53 @@ router.get("/:folderId/children", authMiddleware, async (req, res) => {
         });
 
     } catch (error) {
+
         console.error("Get child folders error:", error);
 
         return res.status(500).json({
             message: "Failed to fetch child folders"
+        });
+    }
+});
+
+
+// ========================================
+// GET SINGLE FOLDER
+// GET /api/folders/:folderId
+// ========================================
+
+router.get("/:folderId", authMiddleware, async (req, res) => {
+
+    try {
+
+        const { folderId } = req.params;
+
+        const { data, error } = await supabase
+            .from("folders")
+            .select("*")
+            .eq("id", folderId)
+            .eq("owner_id", req.user.id)
+            .eq("is_deleted", false)
+            .single();
+
+        if (error || !data) {
+
+            return res.status(404).json({
+                message: "Folder not found"
+            });
+        }
+
+        return res.status(200).json({
+            message: "Folder fetched successfully",
+            folder: data
+        });
+
+    } catch (error) {
+
+        console.error("Get folder error:", error);
+
+        return res.status(500).json({
+            message: "Failed to fetch folder"
         });
     }
 });
@@ -211,12 +323,14 @@ router.get("/:folderId/children", authMiddleware, async (req, res) => {
 // ========================================
 
 router.put("/:folderId", authMiddleware, async (req, res) => {
+
     try {
+
         const { folderId } = req.params;
         const { name } = req.body;
 
-        // Validate new name
         if (!name || !name.trim()) {
+
             return res.status(400).json({
                 message: "New folder name is required"
             });
@@ -235,6 +349,7 @@ router.put("/:folderId", authMiddleware, async (req, res) => {
             .single();
 
         if (error || !data) {
+
             return res.status(404).json({
                 message: "Folder not found"
             });
@@ -246,6 +361,7 @@ router.put("/:folderId", authMiddleware, async (req, res) => {
         });
 
     } catch (error) {
+
         console.error("Rename folder error:", error);
 
         return res.status(500).json({
@@ -261,7 +377,9 @@ router.put("/:folderId", authMiddleware, async (req, res) => {
 // ========================================
 
 router.delete("/:folderId", authMiddleware, async (req, res) => {
+
     try {
+
         const { folderId } = req.params;
 
         const { data, error } = await supabase
@@ -277,6 +395,7 @@ router.delete("/:folderId", authMiddleware, async (req, res) => {
             .single();
 
         if (error || !data) {
+
             return res.status(404).json({
                 message: "Folder not found"
             });
@@ -287,6 +406,7 @@ router.delete("/:folderId", authMiddleware, async (req, res) => {
         });
 
     } catch (error) {
+
         console.error("Delete folder error:", error);
 
         return res.status(500).json({

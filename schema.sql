@@ -191,3 +191,45 @@ on files(owner_id, name);
 
 create index if not exists idx_shares_resource_lookup
 on shares(resource_type, resource_id);
+
+-- ============================================
+-- DAY 6: FULL-TEXT SEARCH + PERFORMANCE INDEXES
+-- ============================================
+
+-- Add generated full-text search vectors
+
+alter table files
+add column if not exists search_vector tsvector
+generated always as (
+    to_tsvector('simple', coalesce(name, ''))
+) stored;
+
+alter table folders
+add column if not exists search_vector tsvector
+generated always as (
+    to_tsvector('simple', coalesce(name, ''))
+) stored;
+
+
+-- Full-text search indexes
+
+create index if not exists idx_files_search_vector
+on files using gin(search_vector);
+
+create index if not exists idx_folders_search_vector
+on folders using gin(search_vector);
+
+
+-- Optimized indexes for common user queries
+
+create index if not exists idx_files_owner_deleted_created
+on files(owner_id, is_deleted, created_at desc);
+
+create index if not exists idx_files_owner_folder_deleted_created
+on files(owner_id, folder_id, is_deleted, created_at desc);
+
+create index if not exists idx_folders_owner_deleted_created
+on folders(owner_id, is_deleted, created_at desc);
+
+create index if not exists idx_folders_owner_parent_deleted_created
+on folders(owner_id, parent_id, is_deleted, created_at desc);
