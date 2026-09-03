@@ -62,7 +62,7 @@ app.use("/api/files", fileRoutes);
 
 app.use("/api/folders", folderRoutes);
 
-app.use("/api", shareRoutes);
+app.use("/api/shares", shareRoutes);
 
 /* =========================
    START SERVER

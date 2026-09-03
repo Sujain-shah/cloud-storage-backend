@@ -7,22 +7,28 @@ const authMiddleware = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-
 /* ========================================
    HELPER: VALIDATE RESOURCE
 ======================================== */
 
-async function getOwnedResource(resourceType, resourceId, userId) {
+async function getOwnedResource(
+    resourceType,
+    resourceId,
+    userId
+) {
     const table =
-        resourceType === "file" ? "files" : "folders";
+        resourceType === "file"
+            ? "files"
+            : "folders";
 
-    const { data, error } = await supabase
-        .from(table)
-        .select("*")
-        .eq("id", resourceId)
-        .eq("owner_id", userId)
-        .eq("is_deleted", false)
-        .single();
+    const { data, error } =
+        await supabase
+            .from(table)
+            .select("*")
+            .eq("id", resourceId)
+            .eq("owner_id", userId)
+            .eq("is_deleted", false)
+            .single();
 
     if (error || !data) {
         return null;
@@ -31,140 +37,170 @@ async function getOwnedResource(resourceType, resourceId, userId) {
     return data;
 }
 
-
 /* ========================================
-   SHARE RESOURCE WITH USER
+   SHARE RESOURCE WITH USER BY EMAIL
+
    POST /api/shares
 
    Body:
    {
        "resource_type": "file",
        "resource_id": "...",
-       "grantee_user_id": "...",
+       "email": "user@example.com",
        "role": "viewer"
    }
 ======================================== */
 
-router.post("/", authMiddleware, async (req, res) => {
-    try {
-        const {
-            resource_type,
-            resource_id,
-            grantee_user_id,
-            role
-        } = req.body;
+router.post(
+    "/",
+    authMiddleware,
+    async (req, res) => {
+        try {
+            const {
+                resource_type,
+                resource_id,
+                email,
+                role,
+            } = req.body;
 
-        if (
-            !resource_type ||
-            !resource_id ||
-            !grantee_user_id ||
-            !role
-        ) {
-            return res.status(400).json({
-                message:
-                    "resource_type, resource_id, grantee_user_id and role are required"
-            });
-        }
+            if (
+                !resource_type ||
+                !resource_id ||
+                !email ||
+                !role
+            ) {
+                return res.status(400).json({
+                    message:
+                        "resource_type, resource_id, email and role are required",
+                });
+            }
 
-        if (
-            resource_type !== "file" &&
-            resource_type !== "folder"
-        ) {
-            return res.status(400).json({
-                message:
-                    "resource_type must be file or folder"
-            });
-        }
+            if (
+                resource_type !== "file" &&
+                resource_type !== "folder"
+            ) {
+                return res.status(400).json({
+                    message:
+                        "resource_type must be file or folder",
+                });
+            }
 
-        if (
-            role !== "viewer" &&
-            role !== "editor"
-        ) {
-            return res.status(400).json({
-                message:
-                    "role must be viewer or editor"
-            });
-        }
+            if (
+                role !== "viewer" &&
+                role !== "editor"
+            ) {
+                return res.status(400).json({
+                    message:
+                        "role must be viewer or editor",
+                });
+            }
 
-        if (grantee_user_id === req.user.id) {
-            return res.status(400).json({
-                message:
-                    "You cannot share a resource with yourself"
-            });
-        }
-
-        // Verify resource ownership
-        const resource = await getOwnedResource(
-            resource_type,
-            resource_id,
-            req.user.id
-        );
-
-        if (!resource) {
-            return res.status(404).json({
-                message:
-                    "Resource not found or you do not own it"
-            });
-        }
-
-        // Verify recipient exists
-        const { data: grantee, error: granteeError } =
-            await supabase
-                .from("users")
-                .select("id, email, name")
-                .eq("id", grantee_user_id)
-                .single();
-
-        if (granteeError || !grantee) {
-            return res.status(404).json({
-                message: "User to share with not found"
-            });
-        }
-
-        // Create or update share
-        const { data, error } = await supabase
-            .from("shares")
-            .upsert(
-                {
+            // Verify resource ownership
+            const resource =
+                await getOwnedResource(
                     resource_type,
                     resource_id,
-                    grantee_user_id,
-                    role,
-                    created_by: req.user.id
-                },
-                {
-                    onConflict:
-                        "resource_type,resource_id,grantee_user_id"
-                }
-            )
-            .select()
-            .single();
+                    req.user.id
+                );
 
-        if (error) {
-            console.error("Create share error:", error);
+            if (!resource) {
+                return res.status(404).json({
+                    message:
+                        "Resource not found or you do not own it",
+                });
+            }
 
-            return res.status(400).json({
-                message: error.message
+            // Find user using email
+            const {
+                data: grantee,
+                error: granteeError,
+            } = await supabase
+                .from("users")
+                .select("id, email, name")
+                .eq(
+                    "email",
+                    email.trim().toLowerCase()
+                )
+                .single();
+
+            if (
+                granteeError ||
+                !grantee
+            ) {
+                return res.status(404).json({
+                    message:
+                        "No user found with this email",
+                });
+            }
+
+            // Cannot share with yourself
+            if (
+                grantee.id === req.user.id
+            ) {
+                return res.status(400).json({
+                    message:
+                        "You cannot share a resource with yourself",
+                });
+            }
+
+            // Create or update share
+            const { data, error } =
+                await supabase
+                    .from("shares")
+                    .upsert(
+                        {
+                            resource_type,
+                            resource_id,
+                            grantee_user_id:
+                                grantee.id,
+                            role,
+                            created_by:
+                                req.user.id,
+                        },
+                        {
+                            onConflict:
+                                "resource_type,resource_id,grantee_user_id",
+                        }
+                    )
+                    .select()
+                    .single();
+
+            if (error) {
+                console.error(
+                    "Create share error:",
+                    error
+                );
+
+                return res.status(400).json({
+                    message:
+                        error.message,
+                });
+            }
+
+            return res.status(201).json({
+                message:
+                    "Resource shared successfully",
+                share: data,
+                shared_with: grantee,
+            });
+
+        } catch (error) {
+            console.error(
+                "Create share error:",
+                error
+            );
+
+            return res.status(500).json({
+                message:
+                    "Failed to share resource",
             });
         }
-
-        return res.status(201).json({
-            message: "Resource shared successfully",
-            share: data,
-            shared_with: grantee
-        });
-
-    } catch (error) {
-        console.error("Create share error:", error);
-
-        return res.status(500).json({
-            message: "Failed to share resource"
-        });
     }
-});
+);
 
 /* ========================================
    ACCESS PUBLIC SHAREABLE LINK
+
    GET /api/shares/public/:token
 
    Optional password:
@@ -176,19 +212,25 @@ router.get(
     "/public/:token",
     async (req, res) => {
         try {
-            const { token } = req.params;
+            const { token } =
+                req.params;
 
-            const { data: linkShare, error } =
-                await supabase
-                    .from("link_shares")
-                    .select("*")
-                    .eq("token", token)
-                    .single();
+            const {
+                data: linkShare,
+                error,
+            } = await supabase
+                .from("link_shares")
+                .select("*")
+                .eq("token", token)
+                .single();
 
-            if (error || !linkShare) {
+            if (
+                error ||
+                !linkShare
+            ) {
                 return res.status(404).json({
                     message:
-                        "Shareable link not found"
+                        "Shareable link not found",
                 });
             }
 
@@ -201,22 +243,23 @@ router.get(
             ) {
                 return res.status(410).json({
                     message:
-                        "This shareable link has expired"
+                        "This shareable link has expired",
                 });
             }
 
             // Check password
-            if (linkShare.password_hash) {
-
+            if (
+                linkShare.password_hash
+            ) {
                 const password =
                     req.headers[
-                    "x-share-password"
+                        "x-share-password"
                     ];
 
                 if (!password) {
                     return res.status(401).json({
                         message:
-                            "Password required"
+                            "Password required",
                     });
                 }
 
@@ -229,42 +272,52 @@ router.get(
                 if (!validPassword) {
                     return res.status(401).json({
                         message:
-                            "Incorrect password"
+                            "Incorrect password",
                     });
                 }
             }
 
             const table =
-                linkShare.resource_type === "file"
+                linkShare.resource_type ===
+                "file"
                     ? "files"
                     : "folders";
 
-            const { data: resource, error: resourceError } =
-                await supabase
-                    .from(table)
-                    .select("*")
-                    .eq("id", linkShare.resource_id)
-                    .eq("is_deleted", false)
-                    .single();
+            const {
+                data: resource,
+                error: resourceError,
+            } = await supabase
+                .from(table)
+                .select("*")
+                .eq(
+                    "id",
+                    linkShare.resource_id
+                )
+                .eq(
+                    "is_deleted",
+                    false
+                )
+                .single();
 
-            if (resourceError || !resource) {
+            if (
+                resourceError ||
+                !resource
+            ) {
                 return res.status(404).json({
                     message:
-                        "Shared resource no longer exists"
+                        "Shared resource no longer exists",
                 });
             }
 
-            // If shared resource is a file,
-            // generate secure signed URL
             let signed_url = null;
 
             if (
-                linkShare.resource_type === "file"
+                linkShare.resource_type ===
+                "file"
             ) {
-
                 const {
                     data: signedData,
-                    error: signedError
+                    error: signedError,
                 } =
                     await supabase.storage
                         .from("files")
@@ -298,12 +351,11 @@ router.get(
                         !!linkShare.password_hash,
 
                     role:
-                        linkShare.role
-                }
+                        linkShare.role,
+                },
             });
 
         } catch (error) {
-
             console.error(
                 "Access public link error:",
                 error
@@ -311,13 +363,15 @@ router.get(
 
             return res.status(500).json({
                 message:
-                    "Failed to access shared resource"
+                    "Failed to access shared resource",
             });
         }
     }
 );
+
 /* ========================================
    GET ALL SHARES FOR A RESOURCE
+
    GET /api/shares/:resourceType/:resourceId
 ======================================== */
 
@@ -328,7 +382,7 @@ router.get(
         try {
             const {
                 resourceType,
-                resourceId
+                resourceId,
             } = req.params;
 
             if (
@@ -337,44 +391,54 @@ router.get(
             ) {
                 return res.status(400).json({
                     message:
-                        "resourceType must be file or folder"
+                        "resourceType must be file or folder",
                 });
             }
 
-            // Only owner can see sharing list
-            const resource = await getOwnedResource(
-                resourceType,
-                resourceId,
-                req.user.id
-            );
+            const resource =
+                await getOwnedResource(
+                    resourceType,
+                    resourceId,
+                    req.user.id
+                );
 
             if (!resource) {
                 return res.status(404).json({
                     message:
-                        "Resource not found or you do not own it"
+                        "Resource not found or you do not own it",
                 });
             }
 
-            const { data, error } = await supabase
-                .from("shares")
-                .select(`
-                    id,
-                    resource_type,
-                    resource_id,
-                    role,
-                    created_at,
-                    grantee_user_id,
-                    users!shares_grantee_user_id_fkey (
+            const { data, error } =
+                await supabase
+                    .from("shares")
+                    .select(`
                         id,
-                        name,
-                        email
+                        resource_type,
+                        resource_id,
+                        role,
+                        created_at,
+                        grantee_user_id,
+                        users!shares_grantee_user_id_fkey (
+                            id,
+                            name,
+                            email
+                        )
+                    `)
+                    .eq(
+                        "resource_type",
+                        resourceType
                     )
-                `)
-                .eq("resource_type", resourceType)
-                .eq("resource_id", resourceId)
-                .order("created_at", {
-                    ascending: false
-                });
+                    .eq(
+                        "resource_id",
+                        resourceId
+                    )
+                    .order(
+                        "created_at",
+                        {
+                            ascending: false,
+                        }
+                    );
 
             if (error) {
                 console.error(
@@ -383,14 +447,15 @@ router.get(
                 );
 
                 return res.status(400).json({
-                    message: error.message
+                    message:
+                        error.message,
                 });
             }
 
             return res.status(200).json({
                 message:
                     "Shares fetched successfully",
-                shares: data
+                shares: data || [],
             });
 
         } catch (error) {
@@ -401,15 +466,15 @@ router.get(
 
             return res.status(500).json({
                 message:
-                    "Failed to fetch shares"
+                    "Failed to fetch shares",
             });
         }
     }
 );
 
-
 /* ========================================
    REVOKE USER SHARE
+
    DELETE /api/shares/:shareId
 ======================================== */
 
@@ -418,50 +483,61 @@ router.delete(
     authMiddleware,
     async (req, res) => {
         try {
-            const { shareId } = req.params;
+            const { shareId } =
+                req.params;
 
-            // Get share first
-            const { data: share, error: shareError } =
-                await supabase
-                    .from("shares")
-                    .select("*")
-                    .eq("id", shareId)
-                    .single();
+            const {
+                data: share,
+                error: shareError,
+            } = await supabase
+                .from("shares")
+                .select("*")
+                .eq("id", shareId)
+                .single();
 
-            if (shareError || !share) {
+            if (
+                shareError ||
+                !share
+            ) {
                 return res.status(404).json({
-                    message: "Share not found"
+                    message:
+                        "Share not found",
                 });
             }
 
-            // Verify owner
-            const resource = await getOwnedResource(
-                share.resource_type,
-                share.resource_id,
-                req.user.id
-            );
+            const resource =
+                await getOwnedResource(
+                    share.resource_type,
+                    share.resource_id,
+                    req.user.id
+                );
 
             if (!resource) {
                 return res.status(403).json({
                     message:
-                        "You are not allowed to revoke this share"
+                        "You are not allowed to revoke this share",
                 });
             }
 
-            const { error } = await supabase
-                .from("shares")
-                .delete()
-                .eq("id", shareId);
+            const { error } =
+                await supabase
+                    .from("shares")
+                    .delete()
+                    .eq(
+                        "id",
+                        shareId
+                    );
 
             if (error) {
                 return res.status(400).json({
-                    message: error.message
+                    message:
+                        error.message,
                 });
             }
 
             return res.status(200).json({
                 message:
-                    "Share revoked successfully"
+                    "Share revoked successfully",
             });
 
         } catch (error) {
@@ -472,23 +548,23 @@ router.delete(
 
             return res.status(500).json({
                 message:
-                    "Failed to revoke share"
+                    "Failed to revoke share",
             });
         }
     }
 );
 
-
 /* ========================================
    CREATE PUBLIC SHAREABLE LINK
+
    POST /api/shares/link
 
    Body:
    {
        "resource_type": "file",
        "resource_id": "...",
-       "expires_at": "2026-12-31T23:59:59Z",
-       "password": "optional-password"
+       "expires_at": null,
+       "password": null
    }
 ======================================== */
 
@@ -501,7 +577,7 @@ router.post(
                 resource_type,
                 resource_id,
                 expires_at = null,
-                password = null
+                password = null,
             } = req.body;
 
             if (
@@ -510,7 +586,7 @@ router.post(
             ) {
                 return res.status(400).json({
                     message:
-                        "resource_type and resource_id are required"
+                        "resource_type and resource_id are required",
                 });
             }
 
@@ -520,25 +596,24 @@ router.post(
             ) {
                 return res.status(400).json({
                     message:
-                        "resource_type must be file or folder"
+                        "resource_type must be file or folder",
                 });
             }
 
-            // Verify ownership
-            const resource = await getOwnedResource(
-                resource_type,
-                resource_id,
-                req.user.id
-            );
+            const resource =
+                await getOwnedResource(
+                    resource_type,
+                    resource_id,
+                    req.user.id
+                );
 
             if (!resource) {
                 return res.status(404).json({
                     message:
-                        "Resource not found or you do not own it"
+                        "Resource not found or you do not own it",
                 });
             }
 
-            // Validate expiry
             if (expires_at) {
                 const expiryDate =
                     new Date(expires_at);
@@ -550,7 +625,7 @@ router.post(
                 ) {
                     return res.status(400).json({
                         message:
-                            "Invalid expires_at date"
+                            "Invalid expires_at date",
                     });
                 }
 
@@ -559,7 +634,7 @@ router.post(
                 ) {
                     return res.status(400).json({
                         message:
-                            "expires_at must be in the future"
+                            "expires_at must be in the future",
                     });
                 }
             }
@@ -567,36 +642,44 @@ router.post(
             let password_hash = null;
 
             if (password) {
-                if (password.length < 4) {
+                if (
+                    password.length < 4
+                ) {
                     return res.status(400).json({
                         message:
-                            "Password must be at least 4 characters"
+                            "Password must be at least 4 characters",
                     });
                 }
 
                 password_hash =
-                    await bcrypt.hash(password, 10);
+                    await bcrypt.hash(
+                        password,
+                        10
+                    );
             }
 
             const token =
-                crypto.randomBytes(32)
+                crypto
+                    .randomBytes(32)
                     .toString("hex");
 
-            const { data, error } = await supabase
-                .from("link_shares")
-                .insert([
-                    {
-                        resource_type,
-                        resource_id,
-                        token,
-                        role: "viewer",
-                        password_hash,
-                        expires_at,
-                        created_by: req.user.id
-                    }
-                ])
-                .select()
-                .single();
+            const { data, error } =
+                await supabase
+                    .from("link_shares")
+                    .insert([
+                        {
+                            resource_type,
+                            resource_id,
+                            token,
+                            role: "viewer",
+                            password_hash,
+                            expires_at,
+                            created_by:
+                                req.user.id,
+                        },
+                    ])
+                    .select()
+                    .single();
 
             if (error) {
                 console.error(
@@ -605,7 +688,8 @@ router.post(
                 );
 
                 return res.status(400).json({
-                    message: error.message
+                    message:
+                        error.message,
                 });
             }
 
@@ -615,20 +699,27 @@ router.post(
 
                 link_share: {
                     id: data.id,
+
                     resource_type:
                         data.resource_type,
+
                     resource_id:
                         data.resource_id,
+
                     expires_at:
                         data.expires_at,
+
                     created_at:
                         data.created_at,
+
                     password_protected:
-                        !!data.password_hash
+                        !!data.password_hash,
                 },
 
                 share_url:
-                    `http://localhost:5000/api/shares/public/${token}`
+                    `${req.protocol}://${req.get(
+                        "host"
+                    )}/api/shares/public/${token}`,
             });
 
         } catch (error) {
@@ -639,17 +730,15 @@ router.post(
 
             return res.status(500).json({
                 message:
-                    "Failed to create shareable link"
+                    "Failed to create shareable link",
             });
         }
     }
 );
 
-
-
-
 /* ========================================
    REVOKE PUBLIC SHAREABLE LINK
+
    DELETE /api/shares/link/:linkShareId
 ======================================== */
 
@@ -658,23 +747,28 @@ router.delete(
     authMiddleware,
     async (req, res) => {
         try {
-
             const { linkShareId } =
                 req.params;
 
             const {
                 data: linkShare,
-                error: linkError
+                error: linkError,
             } = await supabase
                 .from("link_shares")
                 .select("*")
-                .eq("id", linkShareId)
+                .eq(
+                    "id",
+                    linkShareId
+                )
                 .single();
 
-            if (linkError || !linkShare) {
+            if (
+                linkError ||
+                !linkShare
+            ) {
                 return res.status(404).json({
                     message:
-                        "Shareable link not found"
+                        "Shareable link not found",
                 });
             }
 
@@ -688,7 +782,7 @@ router.delete(
             if (!resource) {
                 return res.status(403).json({
                     message:
-                        "You are not allowed to revoke this link"
+                        "You are not allowed to revoke this link",
                 });
             }
 
@@ -696,21 +790,24 @@ router.delete(
                 await supabase
                     .from("link_shares")
                     .delete()
-                    .eq("id", linkShareId);
+                    .eq(
+                        "id",
+                        linkShareId
+                    );
 
             if (error) {
                 return res.status(400).json({
-                    message: error.message
+                    message:
+                        error.message,
                 });
             }
 
             return res.status(200).json({
                 message:
-                    "Shareable link revoked successfully"
+                    "Shareable link revoked successfully",
             });
 
         } catch (error) {
-
             console.error(
                 "Revoke link error:",
                 error
@@ -718,11 +815,10 @@ router.delete(
 
             return res.status(500).json({
                 message:
-                    "Failed to revoke shareable link"
+                    "Failed to revoke shareable link",
             });
         }
     }
 );
-
 
 module.exports = router;
