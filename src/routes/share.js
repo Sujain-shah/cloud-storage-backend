@@ -199,6 +199,114 @@ router.post(
 );
 
 /* ========================================
+   GET ITEMS SHARED WITH CURRENT USER
+
+   GET /api/shares/received
+======================================== */
+
+router.get(
+    "/received",
+    authMiddleware,
+    async (req, res) => {
+        try {
+            const { data: shares, error } =
+                await supabase
+                    .from("shares")
+                    .select(`
+                        id,
+                        resource_type,
+                        resource_id,
+                        role,
+                        created_at,
+                        created_by
+                    `)
+                    .eq(
+                        "grantee_user_id",
+                        req.user.id
+                    )
+                    .order(
+                        "created_at",
+                        {
+                            ascending: false,
+                        }
+                    );
+
+            if (error) {
+                return res.status(400).json({
+                    message: error.message,
+                });
+            }
+
+            const receivedItems =
+                await Promise.all(
+                    (shares || []).map(
+                        async (share) => {
+                            const table =
+                                share.resource_type ===
+                                    "file"
+                                    ? "files"
+                                    : "folders";
+
+                            const {
+                                data: resource,
+                                error: resourceError,
+                            } = await supabase
+                                .from(table)
+                                .select("*")
+                                .eq(
+                                    "id",
+                                    share.resource_id
+                                )
+                                .eq(
+                                    "is_deleted",
+                                    false
+                                )
+                                .single();
+
+                            if (
+                                resourceError ||
+                                !resource
+                            ) {
+                                return null;
+                            }
+
+                            return {
+                                ...resource,
+                                share_id: share.id,
+                                resource_type:
+                                    share.resource_type,
+                                role: share.role,
+                                shared_at:
+                                    share.created_at,
+                                shared_by:
+                                    share.created_by,
+                            };
+                        }
+                    )
+                );
+
+            return res.status(200).json({
+                message:
+                    "Shared items fetched successfully",
+                items:
+                    receivedItems.filter(Boolean),
+            });
+
+        } catch (error) {
+            console.error(
+                "Get received shares error:",
+                error
+            );
+
+            return res.status(500).json({
+                message:
+                    "Failed to fetch shared items",
+            });
+        }
+    }
+);
+
+/* ========================================
    ACCESS PUBLIC SHAREABLE LINK
 
    GET /api/shares/public/:token
@@ -253,7 +361,7 @@ router.get(
             ) {
                 const password =
                     req.headers[
-                        "x-share-password"
+                    "x-share-password"
                     ];
 
                 if (!password) {
@@ -279,7 +387,7 @@ router.get(
 
             const table =
                 linkShare.resource_type ===
-                "file"
+                    "file"
                     ? "files"
                     : "folders";
 
