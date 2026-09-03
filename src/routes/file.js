@@ -937,80 +937,79 @@ router.get(
 router.get(
     "/:fileId/preview",
     authMiddleware,
-
     async (req, res) => {
-
         try {
+            const { fileId } = req.params;
 
-            const {
-                data: file,
-                error
-            } =
+            // First get the file
+            const { data: file, error: fileError } =
                 await supabase
                     .from("files")
                     .select("*")
-                    .eq(
-                        "id",
-                        req.params.fileId
-                    )
-                    .eq(
-                        "owner_id",
-                        req.user.id
-                    )
-                    .eq(
-                        "is_deleted",
-                        false
-                    )
+                    .eq("id", fileId)
+                    .eq("is_deleted", false)
                     .single();
 
-
-            if (
-                error ||
-                !file
-            ) {
-
+            if (fileError || !file) {
                 return res.status(404).json({
-                    message:
-                        "File not found"
+                    message: "File not found"
                 });
             }
 
+            // Check whether current user is the owner
+            const isOwner =
+                file.owner_id === req.user.id;
 
+            // If not owner, check whether file is shared with them
+            if (!isOwner) {
+                const {
+                    data: share,
+                    error: shareError
+                } = await supabase
+                    .from("shares")
+                    .select("id, role")
+                    .eq("resource_type", "file")
+                    .eq("resource_id", fileId)
+                    .eq("grantee_user_id", req.user.id)
+                    .single();
+
+                if (shareError || !share) {
+                    return res.status(403).json({
+                        message:
+                            "You do not have permission to view this file"
+                    });
+                }
+            }
+
+            // Generate signed preview URL
             const {
                 data,
                 error: signedUrlError
-            } =
-                await supabase.storage
-                    .from("files")
-                    .createSignedUrl(
-                        file.storage_key,
-                        60 * 60
-                    );
-
+            } = await supabase.storage
+                .from("files")
+                .createSignedUrl(
+                    file.storage_key,
+                    60 * 10
+                );
 
             if (signedUrlError) {
-
                 return res.status(400).json({
-                    message:
-                        signedUrlError.message
+                    message: signedUrlError.message
                 });
             }
 
-
             return res.status(200).json({
-
                 message:
                     "Preview URL generated successfully",
-
+                preview_url:
+                    data.signedUrl,
                 url:
                     data.signedUrl,
-
                 expires_in:
-                    3600
+                    "10 minutes"
             });
 
         } catch (error) {
-
             console.error(
                 "File preview error:",
                 error
