@@ -10,43 +10,34 @@ const folderRoutes = require("./routes/folder");
 const shareRoutes = require("./routes/share");
 
 const app = express();
-
 const PORT = process.env.PORT || 5000;
 
 /* =========================
    MIDDLEWARE
 ========================= */
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  "http://localhost:5176",
+  "https://cloud-storage-frontend-eight.vercel.app",
+];
+
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175",
-    ],
-
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "PATCH",
-      "DELETE",
-      "OPTIONS",
-    ],
-
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-    ],
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
 app.use(express.json());
 
 app.use(
-    express.urlencoded({
-        extended: true,
-    })
+  express.urlencoded({
+    extended: true,
+  })
 );
 
 /* =========================
@@ -54,17 +45,14 @@ app.use(
 ========================= */
 
 app.get("/", (req, res) => {
-    res.json({
-        message: "Cloud Storage API is running",
-    });
+  res.json({
+    message: "Cloud Storage API is running",
+  });
 });
 
 app.use("/api/auth", authRoutes);
-
 app.use("/api/files", fileRoutes);
-
 app.use("/api/folders", folderRoutes);
-
 app.use("/api/shares", shareRoutes);
 
 /* =========================
@@ -72,11 +60,9 @@ app.use("/api/shares", shareRoutes);
 ========================= */
 
 if (require.main === module) {
-    app.listen(PORT, () => {
-        console.log(
-            `Server running on http://localhost:${PORT}`
-        );
-    });
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 }
 
 module.exports = app;
