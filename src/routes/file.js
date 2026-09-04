@@ -1390,5 +1390,114 @@ router.delete(
     }
 );
 
+/* =========================
+   DELETE FILE PERMANENTLY
+========================= */
+
+router.delete(
+    "/:fileId/permanent",
+    authMiddleware,
+
+    async (req, res) => {
+        try {
+
+            // Get deleted file first
+            const {
+                data: file,
+                error: findError
+            } =
+                await supabase
+                    .from("files")
+                    .select("*")
+                    .eq(
+                        "id",
+                        req.params.fileId
+                    )
+                    .eq(
+                        "owner_id",
+                        req.user.id
+                    )
+                    .eq(
+                        "is_deleted",
+                        true
+                    )
+                    .single();
+
+
+            if (
+                findError ||
+                !file
+            ) {
+                return res.status(404).json({
+                    message:
+                        "Deleted file not found"
+                });
+            }
+
+
+            // Delete actual file from Supabase Storage
+            const {
+                error: storageError
+            } =
+                await supabase.storage
+                    .from("files")
+                    .remove([
+                        file.storage_key
+                    ]);
+
+
+            if (storageError) {
+                return res.status(400).json({
+                    message:
+                        storageError.message
+                });
+            }
+
+
+            // Delete file metadata permanently
+            const {
+                error: deleteError
+            } =
+                await supabase
+                    .from("files")
+                    .delete()
+                    .eq(
+                        "id",
+                        req.params.fileId
+                    )
+                    .eq(
+                        "owner_id",
+                        req.user.id
+                    );
+
+
+            if (deleteError) {
+                return res.status(400).json({
+                    message:
+                        deleteError.message
+                });
+            }
+
+
+            return res.status(200).json({
+                message:
+                    "File deleted permanently"
+            });
+
+        } catch (error) {
+
+            console.error(
+                "Permanent delete error:",
+                error
+            );
+
+            return res.status(500).json({
+                message:
+                    "Failed to permanently delete file"
+            });
+
+        }
+    }
+);
 
 module.exports = router;
