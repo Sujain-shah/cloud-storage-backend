@@ -22,7 +22,9 @@ app.use(
     origin: [
       "http://localhost:5173",
       "http://localhost:5174",
+      "http://localhost:5175",
     ],
+
     methods: [
       "GET",
       "POST",
@@ -31,6 +33,7 @@ app.use(
       "DELETE",
       "OPTIONS",
     ],
+
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -41,9 +44,9 @@ app.use(
 app.use(express.json());
 
 app.use(
-  express.urlencoded({
-    extended: true,
-  })
+    express.urlencoded({
+        extended: true,
+    })
 );
 
 /* =========================
@@ -51,9 +54,9 @@ app.use(
 ========================= */
 
 app.get("/", (req, res) => {
-  res.json({
-    message: "Cloud Storage API is running",
-  });
+    res.json({
+        message: "Cloud Storage API is running",
+    });
 });
 
 app.use("/api/auth", authRoutes);
@@ -69,11 +72,11 @@ app.use("/api/shares", shareRoutes);
 ========================= */
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(
-      `Server running on http://localhost:${PORT}`
-    );
-  });
+    app.listen(PORT, () => {
+        console.log(
+            `Server running on http://localhost:${PORT}`
+        );
+    });
 }
 
 module.exports = app;
